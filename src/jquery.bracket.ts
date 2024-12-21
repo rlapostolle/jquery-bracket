@@ -20,7 +20,7 @@ enum EntryState {
 
 type BracketDoneCallback<TTeam> = (val: TTeam, next?: boolean) => void;
 
-interface BracketDecorator<TTeam, TScore> {
+interface BracketDecorator<TTeam, TScore, TMData> {
   edit: (
     span: JQuery,
     name: TTeam | null,
@@ -31,6 +31,10 @@ interface BracketDecorator<TTeam, TScore> {
     team: TTeam | null,
     score: TScore | null,
     entryState: EntryState
+  ) => void;
+  renderMatch: (
+    container: JQuery,
+    match: TMData | undefined
   ) => void;
 }
 
@@ -43,16 +47,16 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
   init?: BracketInitData<TTeam, TScore, TMData>;
   save?: (
     data: BracketInitData<TTeam, TScore, TMData>,
-    userData: TUData
+    userData: TUData | undefined
   ) => void;
   userData?: TUData;
-  decorator: BracketDecorator<TTeam, TScore>;
+  decorator: BracketDecorator<TTeam, TScore, TMData>;
   skipConsolationRound?: boolean;
   skipSecondaryFinal?: boolean;
   skipGrandFinalComeback?: boolean;
   dir?: string;
-  onMatchClick?: (data: TMData) => void;
-  onMatchHover?: (data: TMData, hover: boolean) => void;
+  onMatchClick?: (data: TMData | undefined) => void;
+  onMatchHover?: (data: TMData | undefined, hover: boolean) => void;
   disableToolbar?: boolean;
   disableTeamEdit?: boolean;
   disableHighlight?: boolean;
@@ -355,7 +359,7 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
       userData: TUData | undefined
     ) => void;
     userData: TUData | undefined;
-    decorator: BracketDecorator<TTeam, TScore>;
+    decorator: BracketDecorator<TTeam, TScore, TMData>;
     skipConsolationRound: boolean;
     skipSecondaryFinal: boolean;
     skipGrandFinalComeback: boolean;
@@ -467,11 +471,12 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
 
   function defaultEdit(
     span: JQuery,
-    data: string,
+    data: string | null,
     done: BracketDoneCallback<string>
   ): void {
     const input = $('<input type="text">');
-    input.val(data);
+    if(data)
+      input.val(data);
     span.empty().append(input);
     input.focus();
     input.blur(() => {
@@ -488,8 +493,8 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
 
   function defaultRender(
     container: JQuery,
-    team: string,
-    score: number,
+    team: string | null,
+    score: number | null,
     state: EntryState
   ): void {
     switch (state) {
@@ -503,9 +508,13 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
       case EntryState.ENTRY_NO_SCORE:
       case EntryState.ENTRY_DEFAULT_WIN:
       case EntryState.ENTRY_COMPLETE:
-        container.append(team);
+        container.append(team ?? "???");
         return;
     }
+  }
+  
+  function defaultRenderMatch(container: JQuery, data: string): void {
+    return;
   }
 
   function winnerBubbles<TTeam, TScore, TMData, TUData>(
@@ -764,8 +773,10 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
             // Override default connector
             match.setConnectorCb(Option.empty());
           } else if (r < roundCount - 1 || n < 1) {
-            const cb = n % 2 === 0 ? mkMatchConnector(centerConnectors) : null;
-            match.setConnectorCb(Option.of(cb));
+            if(n % 2 === 0)
+              match.setConnectorCb(Option.of(mkMatchConnector(centerConnectors)));
+            else
+              match.setConnectorCb(Option.empty());
           }
         }
       }
@@ -1013,12 +1024,8 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
   }
 
   class Round<TTeam, TScore, TMData, TUData> {
-    private containerWidth = this.opts.teamWidth + this.opts.scoreWidth;
-    private roundCon: JQuery = $(
-      `<div class="round" style="width: ${
-        this.containerWidth
-      }px; margin-right: ${this.opts.roundMargin}px"/>`
-    );
+    private containerWidth: number;
+    private roundCon: JQuery;
     private matches: Array<Match<TTeam, TScore, TMData, TUData>> = [];
 
     constructor(
@@ -1031,7 +1038,14 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
       private mkMatch: MatchCallback<TTeam, TScore, TMData, TUData>,
       private isFirstBracket: boolean,
       private opts: Options<TTeam, TScore, TMData, TUData>
-    ) {}
+    ) {
+      this.containerWidth = this.opts.teamWidth + this.opts.scoreWidth;
+      this.roundCon = $(
+        `<div class="round" style="width: ${
+          this.containerWidth
+        }px; margin-right: ${this.opts.roundMargin}px"/>`
+      );
+    }
 
     get el() {
       return this.roundCon;
@@ -1392,7 +1406,7 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
           const span = $(this);
 
           function editor() {
-            function done_fn(val, next: boolean) {
+            function done_fn(val: TTeam, next?: boolean) {
               // Needs to be taken before possible null is assigned below
               const teamId = team.seed.get();
 
@@ -1427,7 +1441,9 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
           function editor() {
             span.unbind();
 
-            const initialScore = !isNumber(team.score.val) ? "0" : span.text();
+            let initialScore = "0";
+            if(team.score !== null && isNumber(team.score.get()))
+              initialScore = span.text();
             const input = $('<input type="text">');
 
             input.val(initialScore);
@@ -1713,6 +1729,8 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
       if (!isLast) {
         this.connect(this.connectorCb);
       }
+      
+      this.opts.decorator.renderMatch(this.teamCon, this.matchUserData);
     }
     public results(): ResultObject<TScore, TMData> {
       // Either team is bye -> reset (mutate) scores from that match
@@ -2237,14 +2255,21 @@ interface BracketOptions<TTeam, TScore, TMData, TUData> {
       return bracket.obj.data();
     } else if (isInit(method)) {
       const options = method as BracketOptions<string, number, any, any>;
-
+      if (!options.decorator)
+        options.decorator = { edit: defaultEdit, render: defaultRender, renderMatch: defaultRenderMatch };
+      if (!options.decorator.edit) {
+        options.decorator.edit = defaultEdit;
+      }
+      if (!options.decorator.render) {
+        options.decorator.render = defaultRender;
+      }
+      if (!options.decorator.renderMatch) {
+        options.decorator.renderMatch = defaultRenderMatch;
+      }
       return init<string, number, any, any>(
         this,
         {
-          ...options,
-          decorator: options.decorator
-            ? options.decorator
-            : { edit: defaultEdit, render: defaultRender }
+          ...options
         },
         {
           evaluateScore: defaultEvaluateScore,
